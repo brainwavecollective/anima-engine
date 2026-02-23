@@ -1,7 +1,18 @@
+"""anima.py — modified to integrate AnimaTelemetryWriter.
+
+Changes from original:
+- Accepts optional `telemetry_writer: AnimaTelemetryWriter` in __init__
+- _extract_sentence_states_sync emits sentence rows when writer is present
+- process_text emits utterance_final row when writer is present
+- utterance_id is a short uuid generated per process_text call
+- No behaviour changes when telemetry_writer is None
+"""
+
 import asyncio
 import inspect
 import logging
 import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, List, Optional
@@ -15,9 +26,14 @@ from .transforms.blend import Blend
 from .config import Config
 from .extractors.fast import FastExtractor
 from .utils.time_source import TimeSource
+from .telemetry import (
+    AnimaTelemetryWriter,
+    make_sentence_record,
+    make_utterance_final_record,
+)
 
 
-class Animal:
+class Anima:
     """
     Real-time affect generation engine.
 
@@ -25,11 +41,11 @@ class Animal:
     Owns its own loop and broadcasts state at fixed tick rate.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, telemetry_writer: Optional[AnimaTelemetryWriter] = None):
         self.config = config
         self.config.validate()
 
-        self.logger = logging.getLogger("animal")
+        self.logger = logging.getLogger("anima")
         self.logger.setLevel(logging.DEBUG if self.config.debug else logging.INFO)
 
         # Components (loaded in start())
@@ -56,13 +72,27 @@ class Animal:
         self._baseline_task: Optional[asyncio.Task] = None
         self._baseline_lock = asyncio.Lock()
 
+        # --- Telemetry ---
+        self._telemetry: Optional[AnimaTelemetryWriter] = telemetry_writer
+        self._monotonic_start = time.monotonic()
+
+    # ---------------------------------------------------------
+    # Telemetry
+    # ---------------------------------------------------------
+
+    def set_telemetry_writer(self, writer: AnimaTelemetryWriter) -> None:
+        """Attach or replace the telemetry writer after construction."""
+        self._telemetry = writer
+
+    def _monotonic_elapsed(self) -> float:
+        return time.monotonic() - self._monotonic_start
 
     # ---------------------------------------------------------
     # Lifecycle
     # ---------------------------------------------------------
 
     async def start(self) -> None:
-        self.logger.info("Starting Animal...")
+        self.logger.info("Starting Anima...")
 
         try:
             nltk.data.find("tokenizers/punkt")
@@ -79,7 +109,8 @@ class Animal:
 
         # ---- FULL PIPELINE WARMUP (direct, no executor) ----
         self._extract_sentence_states_sync(
-            "Warmup sentence to initialize extractor and embedder."
+            "Warmup sentence to initialize extractor and embedder.",
+            utterance_id=None,  # suppress telemetry during warmup
         )
 
         # Anchor (optional)
@@ -107,10 +138,10 @@ class Animal:
         self._running = True
         self._loop_task = asyncio.create_task(self._loop())
 
-        self.logger.info("Animal started")
+        self.logger.info("Anima started")
 
     async def stop(self) -> None:
-        self.logger.info("Stopping Animal...")
+        self.logger.info("Stopping Anima...")
 
         self._running = False
 
@@ -131,7 +162,7 @@ class Animal:
         if self._anchor_executor:
             self._anchor_executor.shutdown(wait=False)
 
-        self.logger.info("Animal stopped")
+        self.logger.info("Anima stopped")
 
     def subscribe(self, callback: Callable[[List[float]], None]) -> None:
         self._subscribers.append(callback)
@@ -150,23 +181,31 @@ class Animal:
         emotionally dominant sentence.
         """
 
+        self.logger.debug(f"[ANIMA] process_text called: '{text[:80]}'")
+
         if not self.blend or not self.extractor or not self.amplifier:
-            raise RuntimeError("Animal not started. Call `await engine.start()` first.")
+            raise RuntimeError("Anima not started. Call `await engine.start()` first.")
 
         t0 = time.perf_counter()
+        monotonic_s = self._monotonic_elapsed()
 
         text = (text or "").strip()
         if not text:
-            return {"animal": self.blend.current.tolist()}
+            return {"anima": self.blend.current.tolist()}
 
         self._transcript_count += 1
         self._context_buffer.extend(text.split())
 
-        sentence_states, sentences = self._extract_sentence_states_sync(text)
+        # Generate a short utterance ID to group sentence rows with their final row
+        utterance_id = uuid.uuid4().hex[:8]
+
+        sentence_states, sentences = self._extract_sentence_states_sync(
+            text, utterance_id=utterance_id
+        )
 
         if not sentence_states:
             return {
-                "animal": self.blend.current.tolist(),
+                "anima": self.blend.current.tolist(),
                 "sentences_processed": 0,
                 "transcript_count": self._transcript_count,
             }
@@ -181,16 +220,42 @@ class Animal:
         mean_vibe = np.mean(sentence_states, axis=0)
         final_burst = np.clip(0.85 * dominant + 0.15 * mean_vibe, 0.0, 1.0)
 
+        processing_dt = time.perf_counter() - t0
+
+        self._log_full_text_summary(
+            text=text,
+            dominant=dominant,
+            mean_vibe=mean_vibe,
+            final_burst=final_burst,
+            total_dt=processing_dt,
+        )
+
+        # --- Emit utterance_final telemetry row ---
+        if self._telemetry is not None:
+            baseline = self.blend.baseline.tolist()
+            try:
+                rec = make_utterance_final_record(
+                    session_id=self._telemetry.session_id,
+                    utterance_id=utterance_id,
+                    text=text,
+                    baseline=baseline,
+                    dominant=dominant.tolist(),
+                    mean=mean_vibe.tolist(),
+                    final_burst=final_burst.tolist(),
+                    processing_dt_s=processing_dt,
+                    monotonic_s=monotonic_s,
+                )
+                self._telemetry.push(rec)
+            except Exception:
+                self.logger.debug("Anima telemetry push failed", exc_info=True)
+
         self.blend.apply_burst(final_burst, influence=influence)
 
         if self.anchor:
             self._baseline_event.set()
 
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug("ENGINE total dt=%.3fs", time.perf_counter() - t0)
-
         return {
-            "animal": self.blend.current.tolist(),
+            "anima": self.blend.current.tolist(),
             "sentences_processed": len(sentences),
             "transcript_count": self._transcript_count,
         }
@@ -199,11 +264,15 @@ class Animal:
     # Sync extraction (runs directly now)
     # ---------------------------------------------------------
 
-    def _extract_sentence_states_sync(self, text: str):
+    def _extract_sentence_states_sync(
+        self,
+        text: str,
+        utterance_id: Optional[str] = None,
+    ):
         sentences = nltk.sent_tokenize(text)
         sentence_states: List[np.ndarray] = []
-
-        for sentence in sentences:
+        
+        for sentence in sentences:            
             natural = np.array(self.extractor.extract(sentence))
             post_passion = self.amplifier.amplify_passion(natural, self.config.passion)
             post_drama = self.amplifier.snap_drama(post_passion, self.config.drama)
@@ -212,6 +281,24 @@ class Animal:
 
             if self.config.debug:
                 self._log_telemetry(sentence, natural, post_passion, post_drama)
+
+            # --- Emit sentence telemetry row ---
+            if self._telemetry is not None and utterance_id is not None and self.blend is not None:
+                baseline = self.blend.baseline.tolist()
+                try:
+                    rec = make_sentence_record(
+                        session_id=self._telemetry.session_id,
+                        utterance_id=utterance_id,
+                        text=sentence,
+                        natural=natural.tolist(),
+                        passion=post_passion.tolist(),
+                        drama=post_drama.tolist(),
+                        baseline=baseline,
+                        monotonic_s=self._monotonic_elapsed(),
+                    )
+                    self._telemetry.push(rec)
+                except Exception:
+                    self.logger.debug("Anima sentence telemetry push failed", exc_info=True)
 
         return sentence_states, sentences
 
@@ -224,11 +311,11 @@ class Animal:
 
         while self._running:
             self.clock.tick()
-            vibe = self.blend.tick()
+            anima = self.blend.tick()
 
             for sub in self._subscribers:
                 try:
-                    result = sub(vibe)
+                    result = sub(anima)
                     if inspect.isawaitable(result):
                         asyncio.create_task(result)
                 except Exception:
@@ -299,15 +386,48 @@ class Animal:
         natural: np.ndarray,
         post_passion: np.ndarray,
         post_drama: np.ndarray,
+        dominant: np.ndarray = None,
+        mean_vibe: np.ndarray = None,
+        final_burst: np.ndarray = None,
+        total_dt: float = None,
     ) -> None:
         if not self.logger.isEnabledFor(logging.DEBUG):
             return
 
         self.logger.debug("--------------------------------------------------")
-        self.logger.debug("TEXT: %s", sentence)
+        self.logger.debug("SENTENCE: %s", sentence)
         self.logger.debug("NATURAL: %s", natural.tolist())
         self.logger.debug("PASSION: %s", post_passion.tolist())
         self.logger.debug("DRAMA: %s", post_drama.tolist())
         self.logger.debug("BASELINE: %s", self.blend.baseline.tolist())
-        self.logger.debug("--------------------------------------------------")
 
+        if dominant is not None:
+            self.logger.debug("DOMINANT: %s", dominant.tolist())
+        if mean_vibe is not None:
+            self.logger.debug("MEAN: %s", mean_vibe.tolist())
+        if final_burst is not None:
+            self.logger.debug("FINAL_BURST: %s", final_burst.tolist())
+        if total_dt is not None:
+            self.logger.debug("TOTAL_DT: %.3fs", total_dt)
+
+        self.logger.debug("--------------------------------------------------")
+        
+    def _log_full_text_summary(
+        self,
+        text: str,
+        dominant: np.ndarray,
+        mean_vibe: np.ndarray,
+        final_burst: np.ndarray,
+        total_dt: float,
+    ) -> None:
+        if not self.logger.isEnabledFor(logging.DEBUG):
+            return
+
+        self.logger.debug("==================================================")
+        self.logger.debug("FULL_TEXT: %s", text)
+        self.logger.debug("BASELINE: %s", self.blend.baseline.tolist())
+        self.logger.debug("DOMINANT: %s", dominant.tolist())
+        self.logger.debug("MEAN: %s", mean_vibe.tolist())
+        self.logger.debug("FINAL_BURST: %s", final_burst.tolist())
+        self.logger.debug("TOTAL_DT: %.3fs", total_dt)
+        self.logger.debug("==================================================")

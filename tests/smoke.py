@@ -1,56 +1,81 @@
-import asyncio
-import time
-from animal import Animal, Config
+import logging
+import pytest
+from anima import Anima, Config
 
 
-async def run_smoke_test():
+# ---------------------------------------------------------------------------
+# Force pytest to show logs without needing -s
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+    force=True,  # IMPORTANT: overrides pytest capture setup
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def build_engine():
     config = Config(
         enable_anchor=False,
         debug=True,
-        # log_verbosity=1  # uncomment for httpx summaries
-        # log_verbosity=2  # uncomment for + fsspec, filelock
-        # log_verbosity=3  # uncomment for full httpcore firehose
     )
-    config.apply_logging()  # must be first — owns the logging setup
+    config.apply_logging()
+    return Anima(config)
 
-    engine = Animal(config)
-    updates = []
 
-    def subscriber(vibe):
-        updates.append((time.time(), vibe))
+async def get_valence(engine, text: str) -> float:
+    result = await engine.process_text(text)
 
-    engine.subscribe(subscriber)
+    assert "anima" in result
+    assert len(result["anima"]) == 5
 
-    # ------------------------------------------------------------------ startup
+    return result["anima"][0]
+
+
+# ---------------------------------------------------------------------------
+# Emotional ordering smoke test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_emotional_gradient_ordering():
+    engine = build_engine()
     await engine.start()
-    await asyncio.sleep(0.5)
 
-    # ------------------------------------------------------------------ process
-    result = await engine.process_text(
-        "I am absolutely thrilled to be here. This is incredible!"
-    )
+    samples = {
+        "ecstatic": "I feel unstoppable, euphoric, and overflowing with joy.",
+        "happy": "Today feels good. I’m relaxed, smiling, and content.",
+        "neutral": "I went to the store and bought groceries today.",
+        "sad": "I feel tired, disappointed, and emotionally drained.",
+        "despair": "Nothing matters anymore. Everything feels empty and hopeless.",
+    }
 
-    assert "animal" in result, "Response missing 'animal' key"
-    assert len(result["animal"]) == 5, (
-        f"Expected 5 animal values, got {len(result['animal'])}"
-    )
+    values = {}
 
-    # ------------------------------------------------------------------ decay
-    await asyncio.sleep(1.5)
+    for label, text in samples.items():
+        values[label] = await get_valence(engine, text)
 
-    # ------------------------------------------------------------------ stop
     await engine.stop()
 
-    # ------------------------------------------------------------------ assert
-    assert len(updates) > 5, (
-        f"Engine did not tick properly — only {len(updates)} updates received"
-    )
-    assert any(v[1][0] > 0.5 for v in updates), (
-        "Valence never exceeded 0.5 — emotional response may not be working"
-    )
+    # ------------------------------------------------------------------
+    # Print emotion summary (always visible)
+    # ------------------------------------------------------------------
 
-    print("✓ SMOKE TEST PASSED")
+    print("\n=== EMOTIONAL VALUES ===")
+    for k, v in values.items():
+        print(f"{k:10} -> {v:.3f}")
 
+    # ------------------------------------------------------------------
+    # Core guarantees
+    # ------------------------------------------------------------------
 
-if __name__ == "__main__":
-    asyncio.run(run_smoke_test())
+    assert values["happy"] > values["neutral"]
+    assert values["ecstatic"] > values["neutral"]
+
+    assert values["sad"] < values["neutral"]
+    assert values["despair"] < values["neutral"]
+
+    assert values["despair"] < values["sad"]

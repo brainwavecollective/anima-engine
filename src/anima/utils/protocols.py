@@ -1,4 +1,4 @@
-"""Core protocols for animal extensibility."""
+"""Core protocols for anima extensibility."""
 
 from typing import Protocol, List
 

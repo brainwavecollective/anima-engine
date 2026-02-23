@@ -83,7 +83,7 @@ class FastExtractor:
     ):
         self.debug = debug
 
-        self.logger = logging.getLogger("animal.extractor")
+        self.logger = logging.getLogger("anima.extractor")
 
         self.lexicon_path = Path(lexicon_path)
 

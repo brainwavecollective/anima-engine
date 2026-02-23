@@ -21,7 +21,9 @@ class Blend:
 
         # Initial baseline: neutral emotional field
         self.baseline = np.array([0.5, 0.5, 0.5, 0.5, 0.8], dtype=float)
+        
         self.current = self.baseline.copy()
+        self.velocity = np.zeros_like(self.current)
 
         self.hold_until = 0.0
         self.dwell_until = 0.0
@@ -36,6 +38,7 @@ class Blend:
 
         # Immediately show full emotion
         self.current = burst_array.copy()
+        self.velocity[:] = 0.0
 
         now = self.clock.now()
 
@@ -58,11 +61,21 @@ class Blend:
     # ---------------------------------------------------------
 
     def apply_baseline(self, new_baseline: List[float]):
-        # Strong burst influence
-        self.apply_burst(
-            new_baseline,
-            influence=self.config.baseline_influence,
+        """
+        Apply slow baseline update.
+            - This does NOT trigger a burst.
+            - Baseline acts as an attractor field.
+            - Current state will naturally decay toward it via tick().
+        """
+
+        self.baseline = np.array(new_baseline, dtype=float)
+
+        self.baseline = np.clip(
+            self.baseline,
+            self.config.min_vadcc,
+            self.config.max_vadcc,
         )
+
         self.last_baseline_update = self.clock.now()
 
     # ---------------------------------------------------------

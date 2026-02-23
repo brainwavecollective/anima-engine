@@ -19,7 +19,7 @@ _THIRD_PARTY_VERBOSITY: dict[str, int] = {
 
 def _apply_logging(debug: bool, verbosity: int) -> None:
     """
-    Configure logging for Animal.
+    Configure logging for Anima.
 
     debug=True  → your code logs at DEBUG; third-party stays quiet by default.
     verbosity   → independently unlocks noisy third-party loggers:
@@ -43,23 +43,37 @@ def _apply_logging(debug: bool, verbosity: int) -> None:
                 "formatter": "standard",
             },
         },
-        "root": {
-            "handlers": ["console"],
-            "level": logging.DEBUG if debug else logging.INFO,
+        "loggers": {
+            "anima": {
+                "level": logging.DEBUG if debug else logging.INFO,
+                "propagate": True,
+            }
         },
     })
 
     # Third-party loggers stay quiet regardless of debug,
     # unlocking only when verbosity meets their threshold.
     for name, unlocks_at in _THIRD_PARTY_VERBOSITY.items():
-        level = logging.DEBUG if verbosity >= unlocks_at else logging.WARNING
+
+        if verbosity < unlocks_at:
+            level = logging.WARNING
+
+        elif name == "httpx":
+            # httpx: INFO at -v/-vv, DEBUG only at -vvv
+            level = logging.DEBUG if verbosity >= 3 else logging.INFO
+
+        else:
+            # everyone else: INFO until -vvv
+            level = logging.DEBUG if verbosity >= 3 else logging.INFO
+
         logging.getLogger(name).setLevel(level)
+
 
 
 @dataclass
 class Config:
     """
-    Configuration for Animal.
+    Configuration for Anima.
     All tuning parameters live here.
     Mutate before calling engine.start().
     """
@@ -74,6 +88,12 @@ class Config:
     hold_seconds: float = 0.8
     decay_rate: float = 0.06
     tick_rate_hz: float = 10.0
+    # ---------------------------------------------------------
+    # Baseline Blending
+    # ---------------------------------------------------------
+    drift_strength: float = 0.04
+    drift_damping: float = 0.90
+    max_velocity: float = 0.05
     # ---------------------------------------------------------
     # Bounds
     # ---------------------------------------------------------
@@ -129,3 +149,7 @@ class Config:
     def apply_logging(self) -> None:
         """Configure logging based on this config. Call once at startup."""
         _apply_logging(self.debug, self.log_verbosity)
+        
+    def set_log_verbosity(self, verbosity: int) -> None:
+        self.log_verbosity = verbosity
+        _apply_logging(self.debug, verbosity)
