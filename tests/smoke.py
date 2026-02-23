@@ -46,11 +46,11 @@ async def test_emotional_gradient_ordering():
     await engine.start()
 
     samples = {
-        "ecstatic": "I feel unstoppable, euphoric, and overflowing with joy.",
-        "happy": "Today feels good. I’m relaxed, smiling, and content.",
         "neutral": "I went to the store and bought groceries today.",
         "sad": "I feel tired, disappointed, and emotionally drained.",
         "despair": "Nothing matters anymore. Everything feels empty and hopeless.",
+        "ecstatic": "I feel unstoppable, euphoric, and overflowing with joy.",
+        "happy": "Today is a good day. I’m relaxed, smiling, and content.",
     }
 
     values = {}
