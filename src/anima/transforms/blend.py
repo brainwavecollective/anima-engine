@@ -89,10 +89,22 @@ class Blend:
         if now < self.hold_until:
             return self.current.tolist()
 
-        # Decay phase
-        self.current += (
-            (self.baseline - self.current) * self.config.decay_rate
+        # pull toward baseline
+        delta = self.baseline - self.current
+        self.velocity += delta * self.config.drift_strength
+
+        # damping (friction)
+        self.velocity *= self.config.drift_damping
+
+        # safety clamp
+        self.velocity = np.clip(
+            self.velocity,
+            -self.config.max_velocity,
+            self.config.max_velocity,
         )
+
+        # move
+        self.current += self.velocity
 
         # Clip for safety
         self.current = np.clip(
