@@ -1,6 +1,6 @@
 [project]
 name = "anima-engine"
-version = "0.0.1"
+version = "0.0.2"
 description = "Real-time continuous affect engine"
 readme = "README.md"
 requires-python = ">=3.12"
