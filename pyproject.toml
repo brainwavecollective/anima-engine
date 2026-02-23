@@ -36,7 +36,7 @@ log_cli_level = "DEBUG"
 [dependency-groups]
 dev = [
     "build>=1.4.0",
-    "pytest>=9.0.0"
+    "pytest>=9.0.0",
 ]
 
 [tool.uv]

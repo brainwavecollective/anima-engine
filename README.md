@@ -14,7 +14,7 @@ You can get a quick sense for how the engine converts text to an emotional vecto
 
 ## Installation  
 
-`pip install anima-engine@git+https://github.com/brainwavecollective/anima-engine.git`
+`pip install anima-engine`
 
 ## Acknowledgements  
 
