@@ -18,9 +18,9 @@ You can get a quick sense for how the engine converts text to an emotional vecto
 
 ## Acknowledgements  
 
-This project uses the NRC Valence, Arousal, and Dominance (VAD) Lexicon (v2.1) created by Saif M. Mohammad at the National Research Council Canada. 
-Project Homepage: http://saifmohammad.com/WebPages/nrc-vad.html 
-Author Email: saif.mohammad@nrc-cnrc.gc.ca
+This project uses the NRC Valence, Arousal, and Dominance (VAD) Lexicon (v2.1) created by Saif M. Mohammad at the National Research Council Canada.  
+Project Homepage: http://saifmohammad.com/WebPages/nrc-vad.html  
+Author Email: saif.mohammad@nrc-cnrc.gc.ca  
 
 If you use this project in academic work, please cite:
 Mohammad, Saif M. (2025). NRC VAD Lexicon v2: Norms for Valence, Arousal, and Dominance for over 55k English Terms. arXiv:2503.23547.
