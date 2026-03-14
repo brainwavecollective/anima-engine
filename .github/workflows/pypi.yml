@@ -1,0 +1,50 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify tag matches pyproject version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+
+          PYPROJECT_VERSION=$(python - <<'PY'
+import tomllib
+with open("pyproject.toml","rb") as f:
+    data = tomllib.load(f)
+print(data["project"]["version"])
+PY
+)
+
+          echo "Tag version: $TAG"
+          echo "pyproject version: $PYPROJECT_VERSION"
+
+          if [ "$TAG" != "$PYPROJECT_VERSION" ]; then
+            echo "ERROR: Tag version does not match pyproject.toml"
+            exit 1
+          fi
+
+      - name: Install build tool
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
