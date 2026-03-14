@@ -106,10 +106,12 @@ class FastExtractor:
         self._embedding_cache_max = 512  # safe upper bound
 
         # Ensure tokenizer availability
-        try:
-            nltk.data.find("tokenizers/punkt")
-        except LookupError:
-            nltk.download("punkt", quiet=True)
+        for resource in ["punkt", "punkt_tab"]:
+            try:
+                nltk.data.find(f"tokenizers/{resource}")
+            except LookupError:
+                nltk.download(resource, quiet=True)
+
 
         self.logger.info("FastExtractor initialized")
 
